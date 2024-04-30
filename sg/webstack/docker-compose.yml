@@ -1,0 +1,124 @@
+version: '3.8'
+
+x-logging:
+  &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "2"
+    tag: "{{.Name}}"
+
+services:
+  traefik:
+    image: traefik:v2.2
+    ports:
+      - 80:80
+      - 443:443
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.middlewares.admin-auth.basicauth.users=admin:$$apr1$$i7ltkxnf$$xgMvUmL2aKf5jC7geEtfo.
+        - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
+        - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
+        - traefik.http.routers.cloud-public-http.rule=Host(`traefik.sg.callhippo.com`)
+        - traefik.http.routers.cloud-public-http.entrypoints=http
+        - traefik.http.routers.cloud-public-http.middlewares=https-redirect
+        - traefik.http.routers.cloud-public-https.rule=Host(`traefik.sg.callhippo.com`)
+        - traefik.http.routers.cloud-public-https.entrypoints=https
+        - traefik.http.routers.cloud-public-https.tls=true
+        - traefik.http.routers.cloud-public-https.service=api@internal
+        - traefik.http.routers.cloud-public-https.tls.certresolver=le
+        - traefik.http.routers.cloud-public-https.middlewares=admin-auth
+        - traefik.http.routers.metrics-http.rule=Host(`traefik.sg.callhippo.com`) && Path(`/metrics`)
+        - traefik.http.routers.metrics-http.entrypoints=http
+        - traefik.http.routers.metrics-http.middlewares=https-redirect
+        - traefik.http.routers.metrics-https.rule=Host(`traefik.sg.callhippo.com`) && Path(`/metrics`)
+        - traefik.http.routers.metrics-https.entrypoints=https
+        - traefik.http.routers.metrics-https.tls=true
+        - traefik.http.routers.metrics-https.service=prometheus@internal
+        - traefik.http.routers.metrics-https.tls.certresolver=le
+        - traefik.http.routers.metrics-https.middlewares=admin-auth
+        - traefik.http.services.cloud-public.loadbalancer.server.port=8080
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-public-certificates:/certificates
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=true
+      - --providers.docker.swarmMode=true
+      - --entrypoints.http.address=:80
+      - --entrypoints.https.address=:443
+      - --certificatesresolvers.le.acme.email=admin@callhippo.com
+      - --certificatesresolvers.le.acme.storage=/certificates/acme.json
+      - --certificatesresolvers.le.acme.tlschallenge=true
+      - --entrypoints.https.http.tls.domains[0].main=sg.callhippo.com
+      - --entrypoints.https.http.tls.domains[0].sans=*.sg.callhippo.com
+      - --metrics.prometheus=true
+      - --metrics.prometheus.manualrouting=true
+      - --accesslog
+      - --log.level=DEBUG
+      - --log
+      - --api
+    networks:
+      - webstack_callhippo-siprtc
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    logging: *default-logging
+
+  portaineragent:
+    image: portainer/agent:2.11.1
+    ports:
+      - 8080:80
+    environment:
+      AGENT_CLUSTER_ADDR: tasks.portaineragent
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+    networks:
+      - webstack_callhippo-siprtc
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.platform.os == linux]
+    logging: *default-logging
+
+  portainer:
+    image: portainer/portainer-ce:linux-amd64
+    command: ["-H", "tcp://tasks.portaineragent:9001", "--tlsskipverify", "--admin-password", '$$2y$$05$$4C6sh0tzqnoAgccq2lKYXerd2SEcI4.JLP9UWVc7ctQy9QzP.ovJK']
+    volumes:
+      - portainer_data:/data
+    networks:
+      - webstack_callhippo-siprtc
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
+        - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
+        - traefik.http.routers.portainer-http.rule=Host(`portainer.sg.callhippo.com`)
+        - traefik.http.routers.portainer-http.entrypoints=http
+        - traefik.http.routers.portainer-http.middlewares=https-redirect
+        - traefik.http.routers.portainer-https.rule=Host(`portainer.sg.callhippo.com`)
+        - traefik.http.routers.portainer-https.entrypoints=https
+        - traefik.http.routers.portainer-https.tls=true
+        - traefik.http.routers.portainer-https.service=portainer
+        - traefik.http.routers.portainer-https.tls.certresolver=le
+        - traefik.http.services.portainer.loadbalancer.server.port=9000
+    logging: *default-logging
+
+volumes:
+  portainer_data:
+  traefik-public-certificates:
+
+networks:
+  hostnet:
+    external: true
+    name: host
+  webstack_callhippo-siprtc:
+    external: true
