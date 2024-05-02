@@ -1,0 +1,82 @@
+version: '3.8'
+
+x-logging:
+  &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "2"
+    tag: "{{.Name}}"
+
+services:
+  mysql:
+    image: mysql:8.0.29
+    environment:
+      MYSQL_ROOT_PASSWORD: fKUAmVb5fmrqtcjU
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - webstack_callhippo-siprtc
+    ports:
+      -  "3306:3306"
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    logging: *default-logging
+
+  rmq:
+    image: rabbitmq:3.8-management-alpine
+    hostname: rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=dVMxkR3d0srEYRIMsX93
+    volumes:
+      - rmq_data:/var/lib/rabbitmq/mnesia/
+    networks:
+      - webstack_callhippo-siprtc
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.rmq-https.rule=Host(`rmq.sg.callhippo.com`)
+        - traefik.http.routers.rmq-https.entrypoints=https
+        - traefik.http.routers.rmq-https.tls=true
+        - traefik.http.routers.rmq-https.service=rmq
+        - traefik.http.routers.rmq-https.tls.certresolver=le
+        - traefik.http.services.rmq.loadbalancer.server.port=15672
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    logging: *default-logging
+
+  regionredis:
+    image: redis:7.0.0-alpine
+    command: redis-server /usr/local/etc/redis/redis.conf
+    configs:
+      - source: redis_v1
+        target: /usr/local/etc/redis/redis.conf
+    networks:
+      - webstack_callhippo-siprtc
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    logging: *default-logging
+    
+configs:
+  redis_v1:
+    external: true
+
+volumes:
+  mysql_data:
+  rmq_data:
+  
+networks:
+  webstack_callhippo-siprtc:
+    external: true
