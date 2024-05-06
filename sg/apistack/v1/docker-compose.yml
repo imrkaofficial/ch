@@ -51,20 +51,6 @@ services:
         - traefik.http.services.phone.loadbalancer.server.port=80
     logging: *default-logging
 
-  verifytokenservice:
-    image: 083206224061.dkr.ecr.ap-south-1.amazonaws.com/verifytokenservice:8
-    networks:
-      - webstack_callhippo-siprtc
-    configs:
-      - source: verifytokenservice_v2
-        target: /conf/app.conf
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints: [ node.role == worker ]
-    logging: *default-logging
-
   kamgo:
     image: 083206224061.dkr.ecr.ap-south-1.amazonaws.com/kamgo:31
     environment:
@@ -194,10 +180,6 @@ services:
           
 volumes:
   pma_data:
-  
-configs:
-  verifytokenservice_v2:
-    external: true
     
 networks:
   webstack_callhippo-siprtc:
