@@ -1,0 +1,205 @@
+version: '3.8'
+
+x-logging:
+  &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "2"
+    tag: "{{.Name}}"
+
+services:
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    environment:
+      PMA_ARBITRARY: 1
+      PMA_HOST: tasks.dbstack_mysql
+    volumes:
+      - pma_data:/sessions
+    networks:
+      - webstack_callhippo-siprtc
+    deploy:
+      placement:
+        constraints: [node.role==worker]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pma-https.rule=Host(`pma.sg.callhippo.com`)
+        - traefik.http.routers.pma-https.entrypoints=https
+        - traefik.http.routers.pma-https.tls=true
+        - traefik.http.routers.pma-https.service=pma
+        - traefik.http.routers.pma-https.tls.certresolver=le
+        - traefik.http.services.pma.loadbalancer.server.port=80
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    logging: *default-logging
+
+  phone:
+    image: containous/whoami
+    networks:
+      - webstack_callhippo-siprtc
+    deploy:
+      placement:
+        constraints: [node.role==worker]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.phone-https.rule=Host(`phone.sg.callhippo.com`)
+        - traefik.http.routers.phone-https.entrypoints=https
+        - traefik.http.routers.phone-https.tls=true
+        - traefik.http.routers.phone-https.service=phone
+        - traefik.http.routers.phone-https.tls.certresolver=le
+        - traefik.http.services.phone.loadbalancer.server.port=80
+    logging: *default-logging
+
+  verifytokenservice:
+    image: 083206224061.dkr.ecr.ap-south-1.amazonaws.com/verifytokenservice:8
+    networks:
+      - webstack_callhippo-siprtc
+    configs:
+      - source: verifytokenservice_v2
+        target: /conf/app.conf
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [ node.role == worker ]
+    logging: *default-logging
+
+  kamgo:
+    image: 083206224061.dkr.ecr.ap-south-1.amazonaws.com/kamgo:31
+    environment:
+      - LOG_LEVEL=INFO
+      - CACHE_ADDR=tasks.dbstack_regionredis:6379
+      - KAMAILIO_DB_NAME=kamailio
+      - KAMAILIO_DB_USER=kamuser
+      - KAMAILIO_DB_SECRET=8nx4HjgLvyzNkGajJd
+      - KAMAILIO_DB_HOST=tasks.dbstack_mysql
+      - KAMAILIO_DB_PORT=3306
+      - RPC_ADDR=tasks.voicestack_sipproxy:2046
+      - AWS_ACCESS_KEY_ID=AKIARGX32HC63EXXQV6P
+      - AWS_SECRET_ACCESS_KEY=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
+      - AWS_REGION=ap-south-1
+      - AWS_ANDROID_PUSH_ARN=arn:aws:sns:ap-south-1:083206224061:app/GCM/SipRtcApplePushNotification      
+    networks:
+      - webstack_callhippo-siprtc
+    deploy:
+      placement:
+        constraints: [node.role==worker]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.kamgo-http.rule=Host(`kamgo.sg.callhippo.com`)
+        - traefik.http.routers.kamgo-http.entrypoints=http
+        - traefik.http.routers.kamgo-http.middlewares=https-redirect
+        - traefik.http.routers.kamgo-https.rule=Host(`kamgo.sg.callhippo.com`)
+        - traefik.http.routers.kamgo-https.entrypoints=https
+        - traefik.http.routers.kamgo-https.tls=true
+        - traefik.http.routers.kamgo-https.middlewares=admin-auth
+        - traefik.http.routers.kamgo-https.service=kamgo
+        - traefik.http.routers.kamgo-https.tls.certresolver=le
+        - traefik.http.services.kamgo.loadbalancer.server.port=8080
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    logging: *default-logging
+
+  webmslb:
+    image: 083206224061.dkr.ecr.ap-south-1.amazonaws.com/webmslb:15
+    environment:
+      - REDIS_HOST=tasks.dbstack_regionredis
+      - GIN_PORT=:8080
+      - FS_HOSTS=172.31.4.117:9092
+    networks:
+      - webstack_callhippo-siprtc
+    deploy:
+      placement:
+        constraints: [node.role==worker]
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.webmslb-http.rule=Host(`webmslb.sg.callhippo.com`)
+        - traefik.http.routers.webmslb-http.entrypoints=http
+        - traefik.http.routers.webmslb-http.middlewares=https-redirect
+        - traefik.http.routers.webmslb-https.rule=Host(`webmslb.sg.callhippo.com`)
+        - traefik.http.routers.webmslb-https.entrypoints=https
+        - traefik.http.routers.webmslb-https.tls=true
+        - traefik.http.routers.webmslb-https.middlewares=admin-auth
+        - traefik.http.routers.webmslb-https.service=webmslb
+        - traefik.http.routers.webmslb-https.tls.certresolver=le
+        - traefik.http.services.webmslb.loadbalancer.server.port=8080
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    logging: *default-logging
+
+  heartbeat_consumer:
+    image: 083206224061.dkr.ecr.ap-south-1.amazonaws.com/fsevent_rmq_consumer:71
+    environment:
+      - HB_URI=https://private.siprtc.io/priv/HeartBeat
+      - RABBITMQ_URI=amqp://admin:dVMxkR3d0srEYRIMsX93@tasks.dbstack_rmq:5672/
+      - REDIS_URI=tasks.dbstack_regionredis:6379
+      - RABBITMQ_QUEUE=session_heartbeat_stats
+      - RABBITMQ_CONSUMER_TAG=heartbeat
+      - REGION=IND
+      - MSLB_URL=https://webmslb.sg.callhippo.com
+    networks:
+      - webstack_callhippo-siprtc
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    deploy:
+      placement:
+        constraints: [node.role == worker]
+        max_replicas_per_node: 5
+      replicas: 5
+    logging: *default-logging
+
+  conf_consumer:
+    image: 083206224061.dkr.ecr.ap-south-1.amazonaws.com/fsevent_rmq_consumer:71
+    environment:
+      - REDIS_URI=tasks.dbstack_regionredis:6379
+      - RABBITMQ_URI=amqp://admin:dVMxkR3d0srEYRIMsX93@tasks.dbstack_rmq:5672/
+      - RABBITMQ_QUEUE=conference_queue_stats
+      - RABBITMQ_CONSUMER_TAG=conference
+      - MSLB_DOMAIN=webmslb.sg.callhippo.com
+    networks:
+      - webstack_callhippo-siprtc
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    deploy:
+      placement:
+        constraints: [node.role == worker]
+        max_replicas_per_node: 20
+      replicas: 10
+    logging: *default-logging
+
+  call_consumer:
+    image: 083206224061.dkr.ecr.ap-south-1.amazonaws.com/fsevent_rmq_consumer:71
+    environment:
+      - REDIS_URI=tasks.dbstack_regionredis:6379
+      - MSLB_URL=https://webmslb.sg.callhippo.com
+      - RABBITMQ_URI=amqp://admin:dVMxkR3d0srEYRIMsX93@tasks.dbstack_rmq:5672/
+      - RABBITMQ_QUEUE=call_queue_stats
+      - RABBITMQ_CONSUMER_TAG=call
+    networks:
+      - webstack_callhippo-siprtc
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    deploy:
+      placement:
+        constraints: [node.role == worker]
+        max_replicas_per_node: 20
+      replicas: 10
+    logging: *default-logging
+          
+volumes:
+  pma_data:
+  
+configs:
+  verifytokenservice_v2:
+    external: true
+    
+networks:
+  webstack_callhippo-siprtc:
+    external: true
+   
